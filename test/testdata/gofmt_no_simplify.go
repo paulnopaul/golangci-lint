@@ -1,5 +1,5 @@
-//args: -Egofmt
-//config: linters-settings.gofmt.simplify=false
+//golangcitest:args -Egofmt
+//golangcitest:config linters-settings.gofmt.simplify=false
 package testdata
 
 import "fmt"
@@ -9,5 +9,5 @@ func GofmtNotSimplifiedOk() {
 	fmt.Print(x[1:len(x)])
 }
 
-func GofmtBadFormat(){  // ERROR "^File is not `gofmt`-ed$"
+func GofmtBadFormat(){  // ERROR "^File is not `gofmt`-ed"
 }

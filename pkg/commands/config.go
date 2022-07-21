@@ -35,22 +35,34 @@ func (e *Executor) initConfig() {
 	cmd.AddCommand(pathCmd)
 }
 
+// getUsedConfig returns the resolved path to the golangci config file, or the empty string
+// if no configuration could be found.
+func (e *Executor) getUsedConfig() string {
+	usedConfigFile := viper.ConfigFileUsed()
+	if usedConfigFile == "" {
+		return ""
+	}
+
+	prettyUsedConfigFile, err := fsutils.ShortestRelPath(usedConfigFile, "")
+	if err != nil {
+		e.log.Warnf("Can't pretty print config file path: %s", err)
+		return usedConfigFile
+	}
+
+	return prettyUsedConfigFile
+}
+
 func (e *Executor) executePathCmd(_ *cobra.Command, args []string) {
 	if len(args) != 0 {
 		e.log.Fatalf("Usage: golangci-lint config path")
 	}
 
-	usedConfigFile := viper.ConfigFileUsed()
+	usedConfigFile := e.getUsedConfig()
 	if usedConfigFile == "" {
 		e.log.Warnf("No config file detected")
 		os.Exit(exitcodes.NoConfigFileDetected)
 	}
 
-	usedConfigFile, err := fsutils.ShortestRelPath(usedConfigFile, "")
-	if err != nil {
-		e.log.Warnf("Can't pretty print config file path: %s", err)
-	}
-
 	fmt.Println(usedConfigFile)
-	os.Exit(0)
+	os.Exit(exitcodes.Success)
 }

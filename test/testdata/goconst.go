@@ -1,4 +1,4 @@
-//args: -Egoconst
+//golangcitest:args -Egoconst
 package testdata
 
 import "fmt"
@@ -28,4 +28,5 @@ func GoconstC() {
 	fmt.Print(b)
 	c := "alreadyhasconst"
 	fmt.Print(c)
+	fmt.Print("alreadyhasconst")
 }

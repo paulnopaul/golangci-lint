@@ -1,5 +1,5 @@
-//args: -Ewsl
-//config: linters-settings.wsl.tests=1
+//golangcitest:args -Ewsl
+//golangcitest:config linters-settings.wsl.tests=1
 package testdata
 
 import (
@@ -66,7 +66,14 @@ func main() {
 		"multiple",
 	)
 	if err != nil { // ERROR "if statements should only be cuddled with assignments used in the if statement itself"
-		panic(notErr)
+		panic("not from the line above")
+	}
+
+	// This is OK since we use a variable from the line above, even if we don't
+	// check it with the if.
+	xx := notErr
+	if err != nil {
+		panic(xx)
 	}
 }
 

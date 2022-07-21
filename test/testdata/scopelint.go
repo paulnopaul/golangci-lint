@@ -1,4 +1,4 @@
-//args: -Escopelint
+//golangcitest:args -Escopelint --internal-cmd-test
 package testdata
 
 import "fmt"

@@ -1,4 +1,4 @@
-//args: -Einterfacer
+//golangcitest:args -Einterfacer --internal-cmd-test
 package testdata
 
 import "io"

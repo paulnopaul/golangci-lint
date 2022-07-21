@@ -1,5 +1,5 @@
-//args: -Eerrcheck
-//config_path: testdata/errcheck/ignore_config.yml
+//golangcitest:args -Eerrcheck
+//golangcitest:config_path testdata/errcheck/ignore_config.yml
 package testdata
 
 import (
@@ -12,8 +12,8 @@ func TestErrcheckIgnoreOs() {
 	_, _ = os.Open("f.txt")
 }
 
-func TestErrcheckNoIgnoreFmt(s string) int {
-	n, _ := fmt.Println(s) // ERROR "Error return value of `fmt.Println` is not checked"
+func TestErrcheckIgnoreFmt(s string) int {
+	n, _ := fmt.Println(s)
 	return n
 }
 

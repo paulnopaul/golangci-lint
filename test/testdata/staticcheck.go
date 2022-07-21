@@ -1,4 +1,4 @@
-//args: -Estaticcheck
+//golangcitest:args -Estaticcheck
 package testdata
 
 import (
@@ -9,6 +9,7 @@ import (
 func Staticcheck() {
 	var x int
 	x = x // ERROR "self-assignment of x to x"
+	fmt.Printf("%d", x)
 }
 
 func StaticcheckNolintStaticcheck() {
@@ -22,7 +23,7 @@ func StaticcheckNolintMegacheck() {
 }
 
 func StaticcheckDeprecated() {
-	_ = runtime.CPUProfile() // ERROR "SA1019: runtime.CPUProfile is deprecated"
+	_ = runtime.CPUProfile() // ERROR "SA1019: runtime.CPUProfile has been deprecated .*"
 }
 
 func StaticcheckPrintf() {

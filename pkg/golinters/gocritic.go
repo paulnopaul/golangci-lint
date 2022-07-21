@@ -5,12 +5,13 @@ import (
 	"go/ast"
 	"go/types"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"sort"
 	"strings"
 	"sync"
 
-	"github.com/go-lintpack/lintpack"
+	gocriticlinter "github.com/go-critic/go-critic/framework/linter"
 	"golang.org/x/tools/go/analysis"
 
 	"github.com/golangci/golangci-lint/pkg/config"
@@ -21,61 +22,145 @@ import (
 
 const gocriticName = "gocritic"
 
-func NewGocritic() *goanalysis.Linter {
+func NewGocritic(settings *config.GocriticSettings, cfg *config.Config) *goanalysis.Linter {
 	var mu sync.Mutex
 	var resIssues []goanalysis.Issue
 
 	sizes := types.SizesFor("gc", runtime.GOARCH)
 
+	wrapper := goCriticWrapper{
+		settings: settings,
+		cfg:      cfg,
+		sizes:    sizes,
+	}
+
 	analyzer := &analysis.Analyzer{
 		Name: gocriticName,
 		Doc:  goanalysis.TheOnlyanalyzerDoc,
-	}
-	return goanalysis.NewLinter(
-		gocriticName,
-		"The most opinionated Go source code linter",
-		[]*analysis.Analyzer{analyzer},
-		nil,
-	).WithContextSetter(func(lintCtx *linter.Context) {
-		analyzer.Run = func(pass *analysis.Pass) (interface{}, error) {
-			lintpackCtx := lintpack.NewContext(pass.Fset, sizes)
-			enabledCheckers, err := buildEnabledCheckers(lintCtx, lintpackCtx)
+		Run: func(pass *analysis.Pass) (interface{}, error) {
+			issues, err := wrapper.run(pass)
 			if err != nil {
 				return nil, err
 			}
 
-			lintpackCtx.SetPackageInfo(pass.TypesInfo, pass.Pkg)
-			var res []goanalysis.Issue
-			pkgIssues := runGocriticOnPackage(lintpackCtx, enabledCheckers, pass.Files)
-			for i := range pkgIssues {
-				res = append(res, goanalysis.NewIssue(&pkgIssues[i], pass))
-			}
-			if len(res) == 0 {
+			if len(issues) == 0 {
 				return nil, nil
 			}
 
 			mu.Lock()
-			resIssues = append(resIssues, res...)
+			resIssues = append(resIssues, issues...)
 			mu.Unlock()
 
 			return nil, nil
-		}
-	}).WithIssuesReporter(func(*linter.Context) []goanalysis.Issue {
+		},
+	}
+
+	return goanalysis.NewLinter(
+		gocriticName,
+		`Provides diagnostics that check for bugs, performance and style issues.
+Extensible without recompilation through dynamic rules.
+Dynamic rules are written declaratively with AST patterns, filters, report message and optional suggestion.`,
+		[]*analysis.Analyzer{analyzer},
+		nil,
+	).WithIssuesReporter(func(*linter.Context) []goanalysis.Issue {
 		return resIssues
 	}).WithLoadMode(goanalysis.LoadModeTypesInfo)
 }
 
-func normalizeCheckerInfoParams(info *lintpack.CheckerInfo) lintpack.CheckerParams {
-	// lowercase info param keys here because golangci-lint's config parser lowercases all strings
-	ret := lintpack.CheckerParams{}
-	for k, v := range info.Params {
-		ret[strings.ToLower(k)] = v
-	}
-
-	return ret
+type goCriticWrapper struct {
+	settings *config.GocriticSettings
+	cfg      *config.Config
+	sizes    types.Sizes
 }
 
-func configureCheckerInfo(info *lintpack.CheckerInfo, allParams map[string]config.GocriticCheckSettings) error {
+func (w goCriticWrapper) run(pass *analysis.Pass) ([]goanalysis.Issue, error) {
+	linterCtx := gocriticlinter.NewContext(pass.Fset, w.sizes)
+
+	enabledCheckers, err := w.buildEnabledCheckers(linterCtx)
+	if err != nil {
+		return nil, err
+	}
+
+	linterCtx.SetPackageInfo(pass.TypesInfo, pass.Pkg)
+
+	pkgIssues := runGocriticOnPackage(linterCtx, enabledCheckers, pass.Files)
+
+	issues := make([]goanalysis.Issue, 0, len(pkgIssues))
+	for i := range pkgIssues {
+		issues = append(issues, goanalysis.NewIssue(&pkgIssues[i], pass))
+	}
+
+	return issues, nil
+}
+
+func (w goCriticWrapper) buildEnabledCheckers(linterCtx *gocriticlinter.Context) ([]*gocriticlinter.Checker, error) {
+	allParams := w.settings.GetLowercasedParams()
+
+	var enabledCheckers []*gocriticlinter.Checker
+	for _, info := range gocriticlinter.GetCheckersInfo() {
+		if !w.settings.IsCheckEnabled(info.Name) {
+			continue
+		}
+
+		if err := w.configureCheckerInfo(info, allParams); err != nil {
+			return nil, err
+		}
+
+		c, err := gocriticlinter.NewChecker(linterCtx, info)
+		if err != nil {
+			return nil, err
+		}
+		enabledCheckers = append(enabledCheckers, c)
+	}
+
+	return enabledCheckers, nil
+}
+
+func runGocriticOnPackage(linterCtx *gocriticlinter.Context, checkers []*gocriticlinter.Checker,
+	files []*ast.File) []result.Issue {
+	var res []result.Issue
+	for _, f := range files {
+		filename := filepath.Base(linterCtx.FileSet.Position(f.Pos()).Filename)
+		linterCtx.SetFileInfo(filename, f)
+
+		issues := runGocriticOnFile(linterCtx, f, checkers)
+		res = append(res, issues...)
+	}
+	return res
+}
+
+func runGocriticOnFile(linterCtx *gocriticlinter.Context, f *ast.File, checkers []*gocriticlinter.Checker) []result.Issue {
+	var res []result.Issue
+
+	for _, c := range checkers {
+		// All checkers are expected to use *lint.Context
+		// as read-only structure, so no copying is required.
+		for _, warn := range c.Check(f) {
+			pos := linterCtx.FileSet.Position(warn.Node.Pos())
+			issue := result.Issue{
+				Pos:        pos,
+				Text:       fmt.Sprintf("%s: %s", c.Info.Name, warn.Text),
+				FromLinter: gocriticName,
+			}
+
+			if warn.HasQuickFix() {
+				issue.Replacement = &result.Replacement{
+					Inline: &result.InlineFix{
+						StartCol:  pos.Column - 1,
+						Length:    int(warn.Node.End() - warn.Node.Pos()),
+						NewString: string(warn.Suggestion.Replacement),
+					},
+				}
+			}
+
+			res = append(res, issue)
+		}
+	}
+
+	return res
+}
+
+func (w goCriticWrapper) configureCheckerInfo(info *gocriticlinter.CheckerInfo, allParams map[string]config.GocriticCheckSettings) error {
 	params := allParams[strings.ToLower(info.Name)]
 	if params == nil { // no config for this checker
 		return nil
@@ -85,7 +170,7 @@ func configureCheckerInfo(info *lintpack.CheckerInfo, allParams map[string]confi
 	for k, p := range params {
 		v, ok := infoParams[k]
 		if ok {
-			v.Value = p
+			v.Value = w.normalizeCheckerParamsValue(p)
 			continue
 		}
 
@@ -108,55 +193,32 @@ func configureCheckerInfo(info *lintpack.CheckerInfo, allParams map[string]confi
 	return nil
 }
 
-func buildEnabledCheckers(lintCtx *linter.Context, lintpackCtx *lintpack.Context) ([]*lintpack.Checker, error) {
-	s := lintCtx.Settings().Gocritic
-	allParams := s.GetLowercasedParams()
-
-	var enabledCheckers []*lintpack.Checker
-	for _, info := range lintpack.GetCheckersInfo() {
-		if !s.IsCheckEnabled(info.Name) {
-			continue
-		}
-
-		if err := configureCheckerInfo(info, allParams); err != nil {
-			return nil, err
-		}
-
-		c := lintpack.NewChecker(lintpackCtx, info)
-		enabledCheckers = append(enabledCheckers, c)
+func normalizeCheckerInfoParams(info *gocriticlinter.CheckerInfo) gocriticlinter.CheckerParams {
+	// lowercase info param keys here because golangci-lint's config parser lowercases all strings
+	ret := gocriticlinter.CheckerParams{}
+	for k, v := range info.Params {
+		ret[strings.ToLower(k)] = v
 	}
 
-	return enabledCheckers, nil
+	return ret
 }
 
-func runGocriticOnPackage(lintpackCtx *lintpack.Context, checkers []*lintpack.Checker,
-	files []*ast.File) []result.Issue {
-	var res []result.Issue
-	for _, f := range files {
-		filename := filepath.Base(lintpackCtx.FileSet.Position(f.Pos()).Filename)
-		lintpackCtx.SetFileInfo(filename, f)
-
-		issues := runGocriticOnFile(lintpackCtx, f, checkers)
-		res = append(res, issues...)
+// normalizeCheckerParamsValue normalizes value types.
+// go-critic asserts that CheckerParam.Value has some specific types,
+// but the file parsers (TOML, YAML, JSON) don't create the same representation for raw type.
+// then we have to convert value types into the expected value types.
+// Maybe in the future, this kind of conversion will be done in go-critic itself.
+func (w goCriticWrapper) normalizeCheckerParamsValue(p interface{}) interface{} {
+	rv := reflect.ValueOf(p)
+	switch rv.Type().Kind() {
+	case reflect.Int64, reflect.Int32, reflect.Int16, reflect.Int8, reflect.Int:
+		return int(rv.Int())
+	case reflect.Bool:
+		return rv.Bool()
+	case reflect.String:
+		// Perform variable substitution.
+		return strings.ReplaceAll(rv.String(), "${configDir}", w.cfg.GetConfigDir())
+	default:
+		return p
 	}
-	return res
-}
-
-func runGocriticOnFile(ctx *lintpack.Context, f *ast.File, checkers []*lintpack.Checker) []result.Issue {
-	var res []result.Issue
-
-	for _, c := range checkers {
-		// All checkers are expected to use *lint.Context
-		// as read-only structure, so no copying is required.
-		for _, warn := range c.Check(f) {
-			pos := ctx.FileSet.Position(warn.Node.Pos())
-			res = append(res, result.Issue{
-				Pos:        pos,
-				Text:       fmt.Sprintf("%s: %s", c.Info.Name, warn.Text),
-				FromLinter: gocriticName,
-			})
-		}
-	}
-
-	return res
 }

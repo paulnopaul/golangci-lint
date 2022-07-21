@@ -1,8 +1,8 @@
-//args: -Egosec
+//golangcitest:args -Egosec
 package testdata
 
 import (
-	"crypto/md5" // ERROR "G501: Blacklisted import `crypto/md5`: weak cryptographic primitive"
+	"crypto/md5" // ERROR "G501: Blocklisted import crypto/md5: weak cryptographic primitive"
 	"fmt"
 	"log"
 	"os"
@@ -34,5 +34,5 @@ func GosecG204SubprocWithFunc() {
 		return "/tmp/dummy"
 	}
 
-	exec.Command("ls", arg()).Run() // ERROR "G204: Subprocess launched with function call as argument or cmd arguments"
+	exec.Command("ls", arg()).Run() // ERROR "G204: Subprocess launched with a potential tainted input or cmd arguments"
 }
