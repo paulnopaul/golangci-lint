@@ -19,11 +19,6 @@ var defaultLintersSettings = LintersSettings{
 	Dogsled: DogsledSettings{
 		MaxBlankIdentifiers: 2,
 	},
-	ErrorLint: ErrorLintSettings{
-		Errorf:     true,
-		Asserts:    true,
-		Comparison: true,
-	},
 	Exhaustive: ExhaustiveSettings{
 		CheckGenerated:             false,
 		DefaultSignifiesExhaustive: false,
@@ -113,40 +108,10 @@ var defaultLintersSettings = LintersSettings{
 		ForceExclusiveShortDeclarations:  false,
 		ForceCaseTrailingWhitespaceLimit: 0,
 	},
-	NoLintLint: NoLintLintSettings{
-		RequireExplanation: false,
-		AllowLeadingSpace:  true,
-		RequireSpecific:    false,
-		AllowUnused:        false,
-	},
-	Testpackage: TestpackageSettings{
-		SkipRegexp: `(export|internal)_test\.go`,
-	},
-	Nestif: NestifSettings{
-		MinComplexity: 5,
-	},
-	Exhaustive: ExhaustiveSettings{
-		CheckGenerated:             false,
-		DefaultSignifiesExhaustive: false,
-	},
-	Gofumpt: GofumptSettings{
-		ExtraRules: false,
-	},
 	ErrorLint: ErrorLintSettings{
 		Errorf:     true,
 		Asserts:    true,
 		Comparison: true,
-	},
-	Ifshort: IfshortSettings{
-		MaxDeclLines: 1,
-		MaxDeclChars: 30,
-	},
-	Predeclared: PredeclaredSettings{
-		Ignore:    "",
-		Qualified: false,
-	},
-	Forbidigo: ForbidigoSettings{
-		ExcludeGodocExamples: true,
 	},
 	MyErrorLint: MyErrorLintSettings{},
 }
